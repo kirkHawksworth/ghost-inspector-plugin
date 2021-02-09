@@ -16,6 +16,8 @@ public class TestSuite {
 
   private Status status;
 
+  private int passed = 0, failed = 0, executionTimeSecs;
+
   enum Status {
     PENDING,
     COMPLETE_PASS,
@@ -84,5 +86,33 @@ public class TestSuite {
 
   public void setStatus(Status status) {
     this.status = status;
+  }
+
+  public void setSuiteId(String suiteId) {
+    this.suiteId = suiteId;
+  }
+
+  public int getPassed() {
+    return passed;
+  }
+
+  public void setPassed(int passed) {
+    this.passed = passed;
+  }
+
+  public int getFailed() {
+    return failed;
+  }
+
+  public void setFailed(int failed) {
+    this.failed = failed;
+  }
+
+  public int getExecutionTimeSecs() {
+    return executionTimeSecs;
+  }
+
+  public void setExecutionTimeSecs(int executionTimeSecs) {
+    this.executionTimeSecs = executionTimeSecs;
   }
 }

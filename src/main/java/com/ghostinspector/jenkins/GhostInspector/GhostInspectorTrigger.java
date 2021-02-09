@@ -8,11 +8,20 @@ import org.apache.http.client.methods.HttpGet;
 import org.apache.http.impl.nio.client.CloseableHttpAsyncClient;
 import org.apache.http.impl.nio.client.HttpAsyncClients;
 import org.apache.http.util.EntityUtils;
+import org.jaxen.pantry.Test;
 
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
+import java.nio.charset.Charset;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.sql.Time;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Future;
@@ -35,16 +44,20 @@ public class GhostInspectorTrigger implements Callable<String> {
   private final Secret apiKey;
   private final List<TestSuite> testSuiteList;
   private final String startUrl;
-  private final String params;
+  private final String fparams;
 
   private PrintStream log;
 
-  public GhostInspectorTrigger(PrintStream logger, String apiKey, List<TestSuite> testSuiteList, String startUrl, String params) {
+  public GhostInspectorTrigger(PrintStream logger,
+                               String apiKey,
+                               List<TestSuite> testSuiteList,
+                               String startUrl,
+                               String params) {
     this.log = logger;
     this.apiKey = Secret.fromString(apiKey);
     this.testSuiteList = testSuiteList;
     this.startUrl = startUrl;
-    this.params = params;
+    this.fparams = params;
   }
 
   @Override
@@ -75,7 +88,7 @@ public class GhostInspectorTrigger implements Callable<String> {
         if (isSuiteComplete(ts)) {
           continue;
         }
-        ts.setStatus(parseResult(ts.getSuiteId(), fetchUrl(ts.getResultUrl())));
+        setResult(ts, fetchUrl(ts.getResultUrl()));
         if (isSuiteComplete(ts)) {
           log.println("Suite ID: " + ts.getSuiteId() + " has completed.");
         }
@@ -83,6 +96,7 @@ public class GhostInspectorTrigger implements Callable<String> {
 
       int suitesCompleted = countSuitesCompleted();
       if (suitesCompleted == testSuiteList.size()) {
+        writeHtmlOut();
         return getAllSuiteResult();
       }
       else {
@@ -93,6 +107,34 @@ public class GhostInspectorTrigger implements Callable<String> {
     }
   }
 
+  private void writeHtmlOut() {
+    StringBuffer html = new StringBuffer("<h2>Ghost Inspector Results</h2>");
+    html.append("<style>\n" +
+                "#gitable {\n" +
+                "  border: 1px solid black;\n" +
+                "  border-collapse: collapse;\n" +
+                "}\n" +
+                "</style><table id='gitable'><tr style='font-weight:bold;'><td>Suite ID</td><td>Passed</td><td>" +
+                "Failed</td><td>Execution Time (secs)</td></tr>");
+    for (TestSuite ts : testSuiteList) {
+      html.append("<tr>");
+
+      html.append("<td> " + ts.getSuiteId() + "</td>");
+      html.append("<td style='color:green;'> " + ts.getPassed() + "</td>");
+      html.append("<td style='color:red;'> " + ts.getFailed() + "</td>");
+      html.append("<td> " + ts.getExecutionTimeSecs() + "</td>");
+      html.append("</tr>");
+    }
+    html.append("</table>");
+
+    try {
+      Files.write(Paths.get(fparams),
+                  html.toString().getBytes(Charset.forName("UTF-8")));
+    }
+    catch (Exception ioe) {
+      log.println(ioe);
+    }
+  }
   /**
    *  Look at all test suites, if one has failed, return fail
    * @return test suite status
@@ -117,9 +159,9 @@ public class GhostInspectorTrigger implements Callable<String> {
     if (startUrl != null && !startUrl.isEmpty()) {
       executeUrl = executeUrl + "&startUrl=" + URLEncoder.encode(startUrl, "UTF-8");
     }
-    if (params != null && !params.isEmpty()) {
-      executeUrl = executeUrl + "&" + params;
-    }
+//    if (params != null && !params.isEmpty()) {
+//      executeUrl = executeUrl + "&" + params;
+//    }
     log.println("Suite Execution URL: " + executeUrl);
 
     // Add API key after URL is logged
@@ -210,23 +252,27 @@ public class GhostInspectorTrigger implements Callable<String> {
    * @param data The JSON to parse in string format
    * @return The status of the suite result
    */
-  private TestSuite.Status parseResult(String suiteId, String data) {
+  private void setResult(TestSuite ts, String data) {
     JSONObject jsonObject = JSONObject.fromObject(data);
     JSONObject result = jsonObject.getJSONObject("data");
 
     if (result.get("passing").toString().equals("null")) {
-      return PENDING;
+      ts.setStatus(PENDING);
+      return;
     }
+    ts.setExecutionTimeSecs((Integer.parseInt(result.get("executionTime").toString()) / 1000));
+    ts.setPassed((Integer)result.get("countPassing"));
+    ts.setFailed((Integer)result.get("countFailing"));
 
-    log.println("Suite ID: " + suiteId);
-    log.println("Test runs passed: " + result.get("countPassing"));
-    log.println("Test runs failed: " + result.get("countFailing"));
-    log.println("Execution time: " + (Integer.parseInt(result.get("executionTime").toString()) / 1000) + " seconds");
+    log.println("Suite ID: " + ts.getSuiteId());
+    log.println("Test runs passed: " + ts.getPassed());
+    log.println("Test runs failed: " + ts.getFailed());
+    log.println("Execution time: " + ts.getExecutionTimeSecs() + " seconds");
 
     if (result.get("passing").toString().equals("true")) {
-      return COMPLETE_PASS;
+      ts.setStatus( COMPLETE_PASS);
     } else {
-      return COMPLETE_FAIL;
+      ts.setStatus(COMPLETE_FAIL);
     }
   }
 
